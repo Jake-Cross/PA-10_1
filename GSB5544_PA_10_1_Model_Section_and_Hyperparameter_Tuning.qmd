@@ -1,0 +1,748 @@
+---
+title: "GSB5544 PA 10.1"
+format:
+  html:
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+
+**Use scikit-learn as much as possible!**
+
+
+```{python}
+import pandas as pd
+import numpy as np
+```
+
+## Ames Housing Data
+
+As usual, we'll try to predict SalePrice using a mix of quantitative and categorical features. See the [data documentation](https://jse.amstat.org/v19n3/decock/DataDocumentation.txt) for all the variables that are available in the data set. We'll try to come up with a model that minimizes test error, measured by root mean square error (RMSE).
+
+```{python}
+df_ames = pd.read_csv("https://raw.githubusercontent.com/kevindavisross/data301/main/data/AmesHousing.txt", sep="\t")
+df_ames
+```
+
+1\. Recall that in a previous notebook we fit a 10-nearest neighbors regression model that predicts the price (just **SalePrice**, not log) of a home using square footage (**Gr Liv Area**), number of bedrooms (**Bedroom AbvGr**), number of full bathrooms (**Full Bath**), number of half bathrooms (**Half Bath**), and **Neighborhood**. But what about other sets of features?
+
+Specify 5 sets of features to investigate. These sets could be subsets of the variables above, but you should also include other variables from the data set. The choice is up to you, but try to guess which sets might lead to good models based on your intuition and what we have already seen for this data set.
+
+For each set of features, fit a 10-nearest neighbors regression model and estimate its test error (RMSE) using cross-validation. You can write a loop to iterate over the sets of features similar to what was done in the Model Selection section of the pre-class notebook.
+
+Report your lowest RMSE and the corresponding features.
+
+```{python}
+# YOUR CODE HERE. ADD CELLS AS NEEDED
+
+
+feature_sets = [
+    ["Gr Liv Area", "Bedroom AbvGr", "Full Bath", "Half Bath", "Neighborhood"],
+    ["Gr Liv Area", "Overall Qual"],
+    ["Gr Liv Area", "Overall Qual", "Neighborhood"],
+    ["Gr Liv Area", "Overall Qual", "Year Built", "Garage Cars"],
+    ["Gr Liv Area", "Overall Qual", "Neighborhood", "Year Built", "Garage Cars", "Total Bsmt SF"]
+]
+
+from sklearn.model_selection import cross_val_score
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import make_column_transformer
+from sklearn.pipeline import make_pipeline
+from sklearn.impute import SimpleImputer
+
+
+results = []
+
+for features in feature_sets:
+    X = df_ames[features]
+    y = df_ames["SalePrice"]
+
+    numeric_features = X.select_dtypes(include="number").columns
+    categorical_features = X.select_dtypes(exclude="number").columns
+
+    preprocessor = make_column_transformer(
+        (make_pipeline(SimpleImputer(strategy="median"),
+                       StandardScaler()), numeric_features),
+        (make_pipeline(SimpleImputer(strategy="most_frequent"),
+                       OneHotEncoder(handle_unknown="ignore")), categorical_features)
+    )
+
+    model = make_pipeline(
+        preprocessor,
+        KNeighborsRegressor(n_neighbors=10)
+    )
+
+    scores = cross_val_score(
+        model, X, y,
+        cv=5,
+        scoring="neg_root_mean_squared_error"
+    )
+
+    rmse = -scores.mean()
+
+    results.append({
+        "Features": features,
+        "RMSE": rmse
+    })
+
+results_df = pd.DataFrame(results)
+results_df.sort_values("RMSE")
+```
+
+I tested five different feature sets using a 10-nearest neighbors regression model and 5-fold cross-validation. The lowest RMSE was $30,814.05, achieved using Gr Liv Area, Overall Qual, Neighborhood, Year Built, Garage Cars, and Total Bsmt SF. This feature set performed better than the original model, suggesting that incorporating additional information about a home's quality, location, and characteristics improves prediction accuracy.
+
+2\. Recall that in a previous notebook we fit a $k$-nearest neighbors regression model that predicts the price (just **SalePrice**, not log) of a home using square footage (**Gr Liv Area**), number of bedrooms (**Bedroom AbvGr**), number of full bathrooms (**Full Bath**), number of half bathrooms (**Half Bath**), and **Neighborhood**. Previously we used a loop to iterate and find the value of $k$ with the smallest test error (RMSE).
+
+Now use grid search in scikit-learn to implement this process. Use the results to create a plot of test error versus $k$.
+
+```{python}
+# YOUR CODE HERE. ADD CELLS AS NEEDED
+
+
+from sklearn.model_selection import GridSearchCV
+import matplotlib.pyplot as plt
+
+features = ["Gr Liv Area", "Bedroom AbvGr", "Full Bath",
+            "Half Bath", "Neighborhood"]
+
+X = df_ames[features]
+y = df_ames["SalePrice"]
+```
+
+```{python}
+
+numeric_features = X.select_dtypes(include="number").columns
+categorical_features = X.select_dtypes(exclude="number").columns
+
+preprocessor = make_column_transformer(
+    (make_pipeline(SimpleImputer(strategy="median"),
+                   StandardScaler()), numeric_features),
+    (make_pipeline(SimpleImputer(strategy="most_frequent"),
+                   OneHotEncoder(handle_unknown="ignore")), categorical_features)
+)
+
+model = make_pipeline(
+    preprocessor,
+    KNeighborsRegressor()
+)
+
+param_grid = {
+    "kneighborsregressor__n_neighbors": range(1, 51)
+}
+
+grid_search = GridSearchCV(
+    model,
+    param_grid,
+    cv=5,
+    scoring="neg_root_mean_squared_error"
+)
+
+grid_search.fit(X, y)
+```
+
+```{python}
+
+print("Best k:", grid_search.best_params_["kneighborsregressor__n_neighbors"])
+print("Lowest RMSE:", -grid_search.best_score_)
+```
+
+```{python}
+
+results = pd.DataFrame(grid_search.cv_results_)
+
+plt.plot(
+    results["param_kneighborsregressor__n_neighbors"].astype(int),
+    -results["mean_test_score"]
+)
+
+plt.xlabel("Number of Neighbors (k)")
+plt.ylabel("Cross-Validation RMSE")
+plt.title("Test Error vs. Number of Neighbors")
+plt.show()
+```
+
+I used GridSearchCV with 5-fold cross-validation to test values of k from 1 to 50. The optimal number of neighbors was k = 6, which produced the lowest RMSE of $39,003.48. The graph shows that RMSE decreases initially, reaches its minimum at k = 6, and then generally increases as k becomes larger. This suggests that using too many neighbors reduces prediction accuracy.
+
+3\. $k$-nearest neighbors relies on distance and we know there are different distance metrics. Repeat the previous part and use grid search to iterate over both (1) `n_neighbors` and (2) `metric`, which can be `"euclidean"` or `"manhattan"` (see the the [`KNeighborsRegressor` documentation](https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KNeighborsRegressor.html)). Compare the results to the previous part. (Hint: recall the note in the pre-class notebook about grid search conventions for refering to steps in the pipeline.)
+
+```{python}
+# YOUR CODE HERE. ADD CELLS AS NEEDED
+
+
+param_grid = {
+    "kneighborsregressor__n_neighbors": range(1, 51),
+    "kneighborsregressor__metric": ["euclidean", "manhattan"]
+}
+
+grid_search_3 = GridSearchCV(
+    model,
+    param_grid,
+    cv=5,
+    scoring="neg_root_mean_squared_error"
+)
+
+grid_search_3.fit(X, y)
+
+print("Best parameters:", grid_search_3.best_params_)
+print("Lowest RMSE:", -grid_search_3.best_score_)
+```
+
+I used GridSearchCV with 5-fold cross-validation to tune both the number of neighbors and the distance metric. The best combination was k = 5 with Manhattan distance, producing an RMSE of $38,348.50. This improved upon the previous model's RMSE of $39,003.48 by approximately $655 (1.68%). Therefore, Manhattan distance performed slightly better for this dataset.
+
+4\. Combine elements of the previous parts and fit what you think will be the best $k$-nearest neighbors model. Specify which features you are using, the value of $k$, and the distance metric. Estimate the test error. (In 2-3 you used the specified set of features. Now you can combine elements of 2-3 with the features you chose in part 1, or other sets of features, as well as investigating other parameter choices.)
+
+Note: Look at the [`KNeighborsRegressor` documentation](https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KNeighborsRegressor.html) for a full list of parameters. You might consider tuning `n_neighbors`, `metric` (or `p`), and/or `weights`. You could also try other elements like scaling too.
+
+```{python}
+# YOUR CODE HERE. ADD CELLS AS NEEDED
+
+
+best_features = [
+    "Gr Liv Area",
+    "Overall Qual",
+    "Neighborhood",
+    "Year Built",
+    "Garage Cars",
+    "Total Bsmt SF"
+]
+
+X_best = df_ames[best_features]
+y = df_ames["SalePrice"]
+```
+
+```{python}
+
+numeric_features = X_best.select_dtypes(include="number").columns
+categorical_features = X_best.select_dtypes(exclude="number").columns
+
+preprocessor_best = make_column_transformer(
+    (make_pipeline(SimpleImputer(strategy="median"),
+                   StandardScaler()), numeric_features),
+    (make_pipeline(SimpleImputer(strategy="most_frequent"),
+                   OneHotEncoder(handle_unknown="ignore")), categorical_features)
+)
+
+model_best = make_pipeline(
+    preprocessor_best,
+    KNeighborsRegressor()
+)
+```
+
+```{python}
+
+param_grid_best = {
+    "kneighborsregressor__n_neighbors": range(1, 51),
+    "kneighborsregressor__metric": ["euclidean", "manhattan"],
+    "kneighborsregressor__weights": ["uniform", "distance"]
+}
+
+grid_search_4 = GridSearchCV(
+    model_best,
+    param_grid_best,
+    cv=5,
+    scoring="neg_root_mean_squared_error"
+)
+
+grid_search_4.fit(X_best, y)
+
+print("Best parameters:", grid_search_4.best_params_)
+print("Lowest RMSE:", -grid_search_4.best_score_)
+```
+
+I used GridSearchCV to optimize a k-nearest neighbors regression model using Gr Liv Area, Overall Qual, Neighborhood, Year Built, Garage Cars, and Total Bsmt SF. I tuned the number of neighbors, distance metric, and weighting method. The best model used k = 6, Euclidean distance, and distance-based weighting. It achieved a cross-validation RMSE of $29,501.24, improving on my previous best result of $30,814.05. This suggests that optimizing hyperparameters can improve prediction accuracy.
+
+5\. Now fit a linear regression model using the same features that you used in the previous part. Estimate the test error. How does the test error for linear regression compare to the kNN model?
+
+```{python}
+# YOUR CODE HERE. ADD CELLS AS NEEDED
+
+
+from sklearn.linear_model import LinearRegression
+
+linear_model = make_pipeline(
+    preprocessor_best,
+    LinearRegression()
+)
+
+linear_scores = cross_val_score(
+    linear_model,
+    X_best,
+    y,
+    cv=5,
+    scoring="neg_root_mean_squared_error"
+)
+
+linear_rmse = -linear_scores.mean()
+
+print("Linear Regression RMSE:", linear_rmse)
+print("kNN RMSE:", -grid_search_4.best_score_)
+```
+
+I fitted a linear regression model using the same six features as my optimized kNN model and evaluated it using 5-fold cross-validation. Linear regression produced an RMSE of $34,066.68, compared to $29,501.24 for kNN. The kNN model had approximately 13.4% lower RMSE, suggesting that it better captured relationships between housing characteristics and sale prices in this experiment.
+
+## Loans Data
+
+The loans data set represents thousands of loans made through the Lending Club platform, which is a platform that allows individuals to lend to other individuals. Of course, not all loans are created equal. Someone who is a essentially a sure bet to pay back a loan will have an easier time getting a loan with a low interest rate than someone who appears to be riskier. And for people who are very risky? They may not even get a loan offer, or they may not have accepted the loan offer due to a high interest rate. It is important to keep that last part in mind, since this dataset only represents loans actually made, i.e. do not mistake this data for loan applications!
+
+[Some information about the data set is here](https://openintrostat.github.io/openintro/reference/loans_full_schema.html). There are also some related exercises in this [OpenIntro textbook](https://openintro-ims.netlify.app/inf-model-mlr.html).
+
+**Our goal will be to develop a regression model for predicting `interest_rate`.**
+
+We will have a competition to see who can come up with the model with the smallest test RMSE. Fit several models and try to find the smallest test RMSE. When you think you have a good one, share your model and its test RMSE. Then see what other people have done; can you do even better?
+
+Note: when you are consider features to include, you might want to consider transformations of the variables.
+
+You should use `GridSearchCV` to tune at least one parameter.
+
+Note: you should do some exploration of the data first before you start fitting models.
+
+```{python}
+df = pd.read_csv("https://raw.githubusercontent.com/kevindavisross/data301/refs/heads/main/data/loans_full_schema.csv")
+
+df
+```
+
+```{python}
+# YOUR CODE HERE. ADD CELLS AS NEEDED
+
+
+print("Dataset shape:", df.shape)
+
+print("\nColumns:")
+print(df.columns.tolist())
+
+print("\nInterest rate summary:")
+print(df["interest_rate"].describe())
+
+print("\nMissing values:")
+print(df.isnull().sum().sort_values(ascending=False).head(15))
+```
+
+```{python}
+
+df.groupby("grade")["interest_rate"].agg(
+    ["count", "mean", "min", "max"]
+).round(2)
+```
+
+```{python}
+
+loan_features = ["grade", "term", "loan_amount"]
+
+X_loans = df[loan_features]
+y_loans = df["interest_rate"]
+
+numeric_features = ["loan_amount"]
+categorical_features = ["grade", "term"]
+
+loan_preprocessor = make_column_transformer(
+    (make_pipeline(SimpleImputer(strategy="median"),
+                   StandardScaler()), numeric_features),
+    (make_pipeline(SimpleImputer(strategy="most_frequent"),
+                   OneHotEncoder(handle_unknown="ignore")), categorical_features)
+)
+
+loan_model = make_pipeline(
+    loan_preprocessor,
+    LinearRegression()
+)
+
+loan_scores = cross_val_score(
+    loan_model,
+    X_loans,
+    y_loans,
+    cv=5,
+    scoring="neg_root_mean_squared_error"
+)
+
+loan_rmse = -loan_scores.mean()
+
+print("Linear Regression RMSE:", loan_rmse)
+```
+
+```{python}
+
+loan_features_2 = ["sub_grade", "term", "loan_amount"]
+
+X_loans_2 = df[loan_features_2]
+
+numeric_features_2 = ["loan_amount"]
+categorical_features_2 = ["sub_grade", "term"]
+
+preprocessor_2 = make_column_transformer(
+    (make_pipeline(SimpleImputer(strategy="median"),
+                   StandardScaler()), numeric_features_2),
+    (make_pipeline(SimpleImputer(strategy="most_frequent"),
+                   OneHotEncoder(handle_unknown="ignore")), categorical_features_2)
+)
+
+loan_model_2 = make_pipeline(
+    preprocessor_2,
+    LinearRegression()
+)
+
+scores_2 = cross_val_score(
+    loan_model_2,
+    X_loans_2,
+    y_loans,
+    cv=5,
+    scoring="neg_root_mean_squared_error"
+)
+
+rmse_2 = -scores_2.mean()
+
+print("Original model RMSE:", loan_rmse)
+print("Sub-grade model RMSE:", rmse_2)
+```
+
+```{python}
+
+from sklearn.linear_model import Ridge
+
+ridge_model = make_pipeline(
+    preprocessor_2,
+    Ridge()
+)
+
+param_grid_ridge = {
+    "ridge__alpha": [0.001, 0.01, 0.1, 1, 10, 100]
+}
+
+grid_search_ridge = GridSearchCV(
+    ridge_model,
+    param_grid_ridge,
+    cv=5,
+    scoring="neg_root_mean_squared_error"
+)
+
+grid_search_ridge.fit(X_loans_2, y_loans)
+
+print("Best alpha:", grid_search_ridge.best_params_["ridge__alpha"])
+print("Ridge RMSE:", -grid_search_ridge.best_score_)
+print("Linear Regression RMSE:", rmse_2)
+```
+
+```{python}
+
+loan_features_3 = [
+    "sub_grade",
+    "term",
+    "loan_amount",
+    "issue_month"
+]
+
+X_loans_3 = df[loan_features_3]
+
+numeric_features_3 = ["loan_amount"]
+categorical_features_3 = ["sub_grade", "term", "issue_month"]
+
+preprocessor_3 = make_column_transformer(
+    (make_pipeline(SimpleImputer(strategy="median"),
+                   StandardScaler()), numeric_features_3),
+    (make_pipeline(SimpleImputer(strategy="most_frequent"),
+                   OneHotEncoder(handle_unknown="ignore")), categorical_features_3)
+)
+
+loan_model_3 = make_pipeline(
+    preprocessor_3,
+    LinearRegression()
+)
+
+scores_3 = cross_val_score(
+    loan_model_3,
+    X_loans_3,
+    y_loans,
+    cv=5,
+    scoring="neg_root_mean_squared_error"
+)
+
+rmse_3 = -scores_3.mean()
+
+print("Previous best RMSE:", rmse_2)
+print("New model RMSE:", rmse_3)
+```
+
+```{python}
+
+df["sub_grade_term"] = (
+    df["sub_grade"].astype(str)
+    + "_"
+    + df["term"].astype(str)
+)
+
+df[["sub_grade", "term", "sub_grade_term"]].head()
+
+
+loan_features_4 = [
+    "sub_grade_term",
+    "loan_amount",
+    "issue_month"
+]
+
+X_loans_4 = df[loan_features_4]
+
+numeric_features_4 = ["loan_amount"]
+categorical_features_4 = ["sub_grade_term", "issue_month"]
+
+preprocessor_4 = make_column_transformer(
+    (make_pipeline(SimpleImputer(strategy="median"),
+                   StandardScaler()), numeric_features_4),
+    (make_pipeline(SimpleImputer(strategy="most_frequent"),
+                   OneHotEncoder(handle_unknown="ignore")), categorical_features_4)
+)
+
+loan_model_4 = make_pipeline(
+    preprocessor_4,
+    LinearRegression()
+)
+
+scores_4 = cross_val_score(
+    loan_model_4,
+    X_loans_4,
+    y_loans,
+    cv=5,
+    scoring="neg_root_mean_squared_error"
+)
+
+rmse_4 = -scores_4.mean()
+
+print("Previous best RMSE:", rmse_3)
+print("Interaction model RMSE:", rmse_4)
+```
+
+```{python}
+
+# LOAN MODEL COMPETITION
+# Compare multiple algorithms and feature combinations
+
+import pandas as pd
+import numpy as np
+
+from sklearn.model_selection import cross_val_score, KFold
+from sklearn.pipeline import make_pipeline
+from sklearn.compose import make_column_transformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.impute import SimpleImputer
+
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
+
+# --------------------------------------------------
+# 1. Create an interaction feature
+# --------------------------------------------------
+
+df["sub_grade_term"] = (
+    df["sub_grade"].astype(str)
+    + "_"
+    + df["term"].astype(str)
+)
+
+# --------------------------------------------------
+# 2. Define four feature combinations
+# --------------------------------------------------
+
+feature_sets_loans = {
+
+    "Basic": [
+        "sub_grade",
+        "term",
+        "loan_amount",
+        "issue_month"
+    ],
+
+    "Financial": [
+        "sub_grade",
+        "term",
+        "loan_amount",
+        "issue_month",
+        "annual_income",
+        "debt_to_income",
+        "verified_income"
+    ],
+
+    "Credit History": [
+        "sub_grade",
+        "term",
+        "loan_amount",
+        "issue_month",
+        "annual_income",
+        "debt_to_income",
+        "delinq_2y",
+        "inquiries_last_12m",
+        "total_credit_lines",
+        "open_credit_lines",
+        "accounts_opened_24m"
+    ],
+
+    "Interaction": [
+        "sub_grade",
+        "term",
+        "sub_grade_term",
+        "loan_amount",
+        "issue_month"
+    ]
+}
+
+# --------------------------------------------------
+# 3. Define models to compare
+# --------------------------------------------------
+
+models = {
+    "Linear Regression": LinearRegression(),
+
+    "Ridge": Ridge(alpha=0.01),
+
+    "Random Forest": RandomForestRegressor(
+        n_estimators=100,
+        min_samples_leaf=2,
+        random_state=42,
+        n_jobs=-1
+    ),
+
+    "Extra Trees": ExtraTreesRegressor(
+        n_estimators=100,
+        min_samples_leaf=2,
+        random_state=42,
+        n_jobs=-1
+    )
+}
+
+# --------------------------------------------------
+# 4. Set up cross-validation
+# --------------------------------------------------
+
+cv = KFold(
+    n_splits=5,
+    shuffle=False
+)
+
+y = df["interest_rate"]
+
+results = []
+
+# --------------------------------------------------
+# 5. Test every feature set and model
+# --------------------------------------------------
+
+for feature_name, features in feature_sets_loans.items():
+
+    X = df[features]
+
+    numeric_features = X.select_dtypes(
+        include="number"
+    ).columns.tolist()
+
+    categorical_features = X.select_dtypes(
+        exclude="number"
+    ).columns.tolist()
+
+    preprocessor = make_column_transformer(
+        (
+            make_pipeline(
+                SimpleImputer(strategy="median"),
+                StandardScaler()
+            ),
+            numeric_features
+        ),
+        (
+            make_pipeline(
+                SimpleImputer(strategy="most_frequent"),
+                OneHotEncoder(handle_unknown="ignore")
+            ),
+            categorical_features
+        )
+    )
+
+    for model_name, estimator in models.items():
+
+        pipeline = make_pipeline(
+            preprocessor,
+            estimator
+        )
+
+        scores = cross_val_score(
+            pipeline,
+            X,
+            y,
+            cv=cv,
+            scoring="neg_root_mean_squared_error",
+            n_jobs=1
+        )
+
+        rmse = -scores.mean()
+
+        results.append({
+            "Features": feature_name,
+            "Model": model_name,
+            "RMSE": rmse
+        })
+
+        print(
+            f"{feature_name} | {model_name}: "
+            f"RMSE = {rmse:.6f}"
+        )
+
+# --------------------------------------------------
+# 6. Rank all models
+# --------------------------------------------------
+
+results_df = pd.DataFrame(results)
+
+results_df = results_df.sort_values(
+    "RMSE"
+).reset_index(drop=True)
+
+print("\n========== FINAL RANKINGS ==========\n")
+
+print(results_df.to_string(index=False))
+
+# --------------------------------------------------
+# 7. Identify the winner
+# --------------------------------------------------
+
+best_result = results_df.iloc[0]
+
+print("\n========== BEST MODEL ==========\n")
+
+print("Best feature set:", best_result["Features"])
+print("Best algorithm:", best_result["Model"])
+print("Best RMSE:", round(best_result["RMSE"], 6))
+
+# --------------------------------------------------
+# 8. Compare against our previous best
+# --------------------------------------------------
+
+previous_best = 0.21088153065687196
+
+print("\nPrevious best RMSE:", round(previous_best, 6))
+
+if best_result["RMSE"] < previous_best:
+
+    print("NEW BEST MODEL!")
+    print(
+        "Improvement:",
+        round(previous_best - best_result["RMSE"], 6)
+    )
+
+else:
+    print("Previous model still wins.")
+```
+
+### Loans Data: Model Selection and Hyperparameter Tuning
+
+I explored the Lending Club dataset, which contains 10,000 loans and 56 variables. The average interest rate was 12.43%, ranging from 5.31% to 30.94%. I found that loan grade was strongly associated with interest rate, with higher-risk grades generally having higher rates.
+
+I tested several regression models using 5-fold cross-validation to minimize RMSE. My initial linear regression model used grade, term, and loan amount and achieved an RMSE of 1.10647. Replacing grade with the more detailed sub_grade variable significantly improved performance, reducing RMSE to 0.21266.
+
+I also used GridSearchCV to tune the alpha parameter of a Ridge regression model. The optimal alpha was 0.001, but Ridge did not outperform linear regression.
+
+Next, I added issue_month, which further reduced RMSE to 0.21088. I also tested interaction features, additional financial and credit-history variables, Random Forest, and Extra Trees models. These alternatives did not improve upon the simpler linear regression model.
+
+**My best model was linear regression using sub_grade, term, loan_amount, and issue_month, achieving a cross-validation RMSE of 0.21088 percentage points.**
+
+Overall, the results suggest that loan sub-grade is the strongest predictor among the variables tested, while issue month provides a small additional improvement. More complex models and additional variables did not necessarily improve predictive accuracy. Because sub_grade is closely related to Lending Club's pricing process, the model is most appropriate for predicting interest rates on loans that have already been assigned a sub-grade.
+
